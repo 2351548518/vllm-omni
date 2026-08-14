@@ -286,7 +286,9 @@ class OmniServer:
             cwd=_omni_subprocess_cwd(),
         )
 
-        max_wait = 1200
+        max_wait = int(
+            os.environ.get("VLLM_TEST_SERVER_START_TIMEOUT", "2400")
+        )
         start_time = time.time()
         while time.time() - start_time < max_wait:
             ret = self.proc.poll()
@@ -443,16 +445,36 @@ class OmniServer:
         except psutil.NoSuchProcess:
             pass
 
-    def __enter__(self):
-        self._start_server()
-        return self
+    def _cleanup(self) -> None:
+        if self.proc is not None:
+            try:
+                self._kill_process_tree(self.proc.pid)
+            finally:
+                self.proc = None
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if self.proc:
-            self._kill_process_tree(self.proc.pid)
         run_pre_test_cleanup()
         run_post_test_cleanup()
         cleanup_dist_env_and_memory()
+
+    def __enter__(self):
+        try:
+            self._start_server()
+        except BaseException:
+            try:
+                self._cleanup()
+            except Exception:
+                logger.exception("OmniServer cleanup failed after startup error")
+            raise
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        try:
+            self._cleanup()
+        except Exception:
+            if exc_type is None:
+                raise
+            logger.exception("OmniServer cleanup failed while handling test error")
+        return False
 
 
 class OmniServerStageCli(OmniServer):

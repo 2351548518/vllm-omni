@@ -14,7 +14,12 @@ from huggingface_hub import snapshot_download
 from tests.helpers.runtime import OmniServerParams
 from tests.helpers.stage_config import get_deploy_config_path, modify_stage_config
 
-MODEL = "openbmb/MiniCPM-o-4_5"
+import os
+
+MODEL = os.environ.get(
+    "VLLM_TEST_MINICPMO_4_5_MODEL",
+    "openbmb/MiniCPM-o-4_5",
+)
 DEPLOY_CONFIG = modify_stage_config(
     get_deploy_config_path("minicpmo_4_5_duplex.yaml"),
     updates={
