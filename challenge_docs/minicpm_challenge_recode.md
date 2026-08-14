@@ -1555,6 +1555,11 @@ env \
     2>&1 | tee "$LOG_DIR/baseline_accuracy_${RUN_ID}.log"
 ```
 
+
+---
+
+可能支持 VideoMME
+
 ```
 cd /workspace/user_data/vllm-omni
 
