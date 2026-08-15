@@ -1567,11 +1567,16 @@ env \
   pytest -s -v -rs \
     tests/e2e/accuracy/minicpmo_4_5/test_minicpmo_4_5.py \
     -m 'full_model' \
-    -k 'daily_omni_accuracy_bench' \
+    -k 'videomme_accuracy_bench' \
     --run-level full_model \
     2>&1 | tee "$LOG_DIR/baseline_accuracy_${RUN_ID}.log"
 ```
 
+
+```
+'seed_tts_wer_bench and not duplex'
+'videomme_accuracy_bench'
+```
 ---
 
 全部测试
@@ -1600,7 +1605,7 @@ env \
   ACC_BENCH_DAILY_OMNI_MAX_CONCURRENCY=2 \
   ACC_BENCH_SEED_TTS_MAX_CONCURRENCY=2 \
   ACC_BENCH_VIDEOMME_NUM_PROMPTS=2700 \
-  ACC_BENCH_VIDEOMME_MAX_CONCURRENCY=4 \
+  ACC_BENCH_VIDEOMME_MAX_CONCURRENCY=2 \
   ACC_BENCH_VIDEOMME_DURATION=all \
   ACC_BENCH_MIN_VIDEOMME_ACCURACY=0.68 \
   SEED_TTS_WER_EVAL=1 \
