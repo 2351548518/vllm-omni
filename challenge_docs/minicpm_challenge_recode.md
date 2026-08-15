@@ -1555,8 +1555,8 @@ env \
   VLLM_DAILY_OMNI_VIDEO_DIR=/workspace/user_data/datasets/Daily-Omni/Videos \
   VLLM_SEED_TTS_DATASET_PATH=/workspace/user_data/datasets/seed-tts-eval/seedtts_testset \
   VLLM_VIDEOMME_DATASET_PATH=/workspace/user_data/datasets/Video-MME/Video-MME \
-  ACC_BENCH_DAILY_OMNI_MAX_CONCURRENCY=2 \
-  ACC_BENCH_SEED_TTS_MAX_CONCURRENCY=2 \
+  ACC_BENCH_DAILY_OMNI_MAX_CONCURRENCY=4 \
+  ACC_BENCH_SEED_TTS_MAX_CONCURRENCY=4 \
   ACC_BENCH_VIDEOMME_NUM_PROMPTS=2700 \
   ACC_BENCH_VIDEOMME_MAX_CONCURRENCY=4 \
   ACC_BENCH_VIDEOMME_DURATION=all \
@@ -1602,10 +1602,10 @@ env \
   VLLM_DAILY_OMNI_VIDEO_DIR=/workspace/user_data/datasets/Daily-Omni/Videos \
   VLLM_SEED_TTS_DATASET_PATH=/workspace/user_data/datasets/seed-tts-eval/seedtts_testset \
   VLLM_VIDEOMME_DATASET_PATH=/workspace/user_data/datasets/Video-MME/Video-MME \
-  ACC_BENCH_DAILY_OMNI_MAX_CONCURRENCY=2 \
-  ACC_BENCH_SEED_TTS_MAX_CONCURRENCY=2 \
+  ACC_BENCH_DAILY_OMNI_MAX_CONCURRENCY=4 \
+  ACC_BENCH_SEED_TTS_MAX_CONCURRENCY=4 \
   ACC_BENCH_VIDEOMME_NUM_PROMPTS=2700 \
-  ACC_BENCH_VIDEOMME_MAX_CONCURRENCY=2 \
+  ACC_BENCH_VIDEOMME_MAX_CONCURRENCY=4 \
   ACC_BENCH_VIDEOMME_DURATION=all \
   ACC_BENCH_MIN_VIDEOMME_ACCURACY=0.68 \
   SEED_TTS_WER_EVAL=1 \
@@ -1636,7 +1636,7 @@ RUN_ID=$(date +%Y%m%d_%H%M%S)
 BENCHMARK_DIR=/workspace/user_data/vllm-omni/challenge_docs/batch_result/origin/simplex_performance python -m pytest -s -v \
   tests/dfx/perf/scripts/run_benchmark.py \
   --test-config-file /workspace/user_data/vllm-omni/challenge_docs/test_yaml/test_minicpmo_4_5.json \
-  -k test_minicpmo_4_5_a2_challenge \
+  -k test_minicpmo_4_5_challenge \
   2>&1 | tee "$LOG_DIR/baseline_simplex_performance_${RUN_ID}.log"
 ```
 
