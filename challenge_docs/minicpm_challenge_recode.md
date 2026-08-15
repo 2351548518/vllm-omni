@@ -1527,38 +1527,12 @@ pip install jiwer zhon -i https://pypi.org/simple --trusted-host pypi.org --trus
 
 ### 精度测试
 
-```
-cd /workspace/user_data/vllm-omni
-
-export VLLM_WORKER_MULTIPROC_METHOD=spawn
-
-export PYTHONUNBUFFERED=1
-export VLLM_LOGGING_LEVEL="${VLLM_LOGGING_LEVEL:-INFO}"
-
-set -o pipefail
-LOG_DIR=/workspace/user_data/vllm-omni/challenge_docs/run_log
-mkdir -p "$LOG_DIR"
-RUN_ID=$(date +%Y%m%d_%H%M%S)
-env \
-  ASCEND_RT_VISIBLE_DEVICES=0 \
-  VLLM_TEST_MINICPMO_4_5_MODEL=/workspace/shared_assets/models/OpenBMB/MiniCPM-o-4_5 \
-  VLLM_DAILY_OMNI_QA_JSON=/workspace/user_data/datasets/Daily-Omni/qa.json \
-  VLLM_DAILY_OMNI_VIDEO_DIR=/workspace/user_data/datasets/Daily-Omni/Videos \
-  VLLM_SEED_TTS_DATASET_PATH=/workspace/user_data/datasets/seed-tts-eval/seedtts_testset \
-  SEED_TTS_WER_EVAL=1 \
-  SEED_TTS_SIM_EVAL=1 \
-  ACC_BENCH_RESULT_DIR=/workspace/user_data/vllm-omni/challenge_docs/batch_result/origin/accuracy \
-  pytest -s -v \
-    tests/e2e/accuracy/minicpmo_4_5/test_minicpmo_4_5.py \
-    -m 'full_model' \
-    --run-level full_model \
-    2>&1 | tee "$LOG_DIR/baseline_accuracy_${RUN_ID}.log"
-```
-
 
 ---
 
-可能支持 VideoMME
+单项测试(VideoMME)
+
+---
 
 ```
 cd /workspace/user_data/vllm-omni
@@ -1581,6 +1555,8 @@ env \
   VLLM_DAILY_OMNI_VIDEO_DIR=/workspace/user_data/datasets/Daily-Omni/Videos \
   VLLM_SEED_TTS_DATASET_PATH=/workspace/user_data/datasets/seed-tts-eval/seedtts_testset \
   VLLM_VIDEOMME_DATASET_PATH=/workspace/user_data/datasets/Video-MME/Video-MME \
+  ACC_BENCH_DAILY_OMNI_MAX_CONCURRENCY=2 \
+  ACC_BENCH_SEED_TTS_MAX_CONCURRENCY=2 \
   ACC_BENCH_VIDEOMME_NUM_PROMPTS=2700 \
   ACC_BENCH_VIDEOMME_MAX_CONCURRENCY=4 \
   ACC_BENCH_VIDEOMME_DURATION=all \
@@ -1588,7 +1564,49 @@ env \
   SEED_TTS_WER_EVAL=1 \
   SEED_TTS_SIM_EVAL=1 \
   ACC_BENCH_RESULT_DIR=/workspace/user_data/vllm-omni/challenge_docs/batch_result/origin/accuracy \
-  pytest -s -v \
+  pytest -s -v -rs \
+    tests/e2e/accuracy/minicpmo_4_5/test_minicpmo_4_5.py \
+    -m 'full_model' \
+    -k 'daily_omni_accuracy_bench' \
+    --run-level full_model \
+    2>&1 | tee "$LOG_DIR/baseline_accuracy_${RUN_ID}.log"
+```
+
+---
+
+全部测试
+
+```
+cd /workspace/user_data/vllm-omni
+
+export VLLM_WORKER_MULTIPROC_METHOD=spawn
+export PYTHONUNBUFFERED=1
+export VLLM_LOGGING_LEVEL="${VLLM_LOGGING_LEVEL:-INFO}"
+
+set -o pipefail
+
+LOG_DIR=/workspace/user_data/vllm-omni/challenge_docs/run_log
+mkdir -p "$LOG_DIR"
+
+RUN_ID=$(date +%Y%m%d_%H%M%S)
+
+env \
+  ASCEND_RT_VISIBLE_DEVICES=0 \
+  VLLM_TEST_MINICPMO_4_5_MODEL=/workspace/shared_assets/models/OpenBMB/MiniCPM-o-4_5 \
+  VLLM_DAILY_OMNI_QA_JSON=/workspace/user_data/datasets/Daily-Omni/qa.json \
+  VLLM_DAILY_OMNI_VIDEO_DIR=/workspace/user_data/datasets/Daily-Omni/Videos \
+  VLLM_SEED_TTS_DATASET_PATH=/workspace/user_data/datasets/seed-tts-eval/seedtts_testset \
+  VLLM_VIDEOMME_DATASET_PATH=/workspace/user_data/datasets/Video-MME/Video-MME \
+  ACC_BENCH_DAILY_OMNI_MAX_CONCURRENCY=2 \
+  ACC_BENCH_SEED_TTS_MAX_CONCURRENCY=2 \
+  ACC_BENCH_VIDEOMME_NUM_PROMPTS=2700 \
+  ACC_BENCH_VIDEOMME_MAX_CONCURRENCY=4 \
+  ACC_BENCH_VIDEOMME_DURATION=all \
+  ACC_BENCH_MIN_VIDEOMME_ACCURACY=0.68 \
+  SEED_TTS_WER_EVAL=1 \
+  SEED_TTS_SIM_EVAL=1 \
+  ACC_BENCH_RESULT_DIR=/workspace/user_data/vllm-omni/challenge_docs/batch_result/origin/accuracy \
+  pytest -s -v -rs \
     tests/e2e/accuracy/minicpmo_4_5/test_minicpmo_4_5.py \
     -m 'full_model' \
     --run-level full_model \

@@ -40,12 +40,40 @@ _RESULT_DIR = Path(
 )
 
 _MIN_DAILY_OMNI_ACCURACY = 0.78
+# Stage 0 is configured with max_num_seqs=4; keep the client-side in-flight
+# request bound aligned with that single-GPU memory profile by default.
+_DAILY_OMNI_MAX_CONCURRENCY = int(
+    os.environ.get("ACC_BENCH_DAILY_OMNI_MAX_CONCURRENCY", "4")
+)
+if _DAILY_OMNI_MAX_CONCURRENCY < 1:
+    raise ValueError("ACC_BENCH_DAILY_OMNI_MAX_CONCURRENCY must be >= 1")
+
+_DAILY_OMNI_LOCAL_ROOT: str | None = None
+_daily_omni_video_dir = os.environ.get("VLLM_DAILY_OMNI_VIDEO_DIR", "").strip()
+if _daily_omni_video_dir:
+    _daily_omni_root = Path(_daily_omni_video_dir).expanduser()
+    if _daily_omni_root.is_dir():
+        _DAILY_OMNI_LOCAL_ROOT = str(_daily_omni_root.resolve())
+
 # MiniCPM-o 4.5 reports 70.4 on Video-MME (w/o subs); ~2pp margin like Daily-Omni.
 _MIN_VIDEOMME_ACCURACY = float(os.environ.get("ACC_BENCH_MIN_VIDEOMME_ACCURACY", "0.68"))
 _MAX_SEED_TTS_MEAN_WER = 0.02
 # Full Seed-TTS zh split (seed-tts-eval/zh/meta.lst) is 2020 rows.
 _SEED_TTS_LOCALE = "zh"
 _SEED_TTS_NUM_PROMPTS = 2020
+_SEED_TTS_LOCAL_ROOT: str | None = None
+_seed_tts_path = os.environ.get("VLLM_SEED_TTS_DATASET_PATH", "").strip()
+if _seed_tts_path:
+    _seed_tts_root = Path(_seed_tts_path).expanduser()
+    if _seed_tts_root.is_dir():
+        _SEED_TTS_LOCAL_ROOT = str(_seed_tts_root.resolve())
+
+_SEED_TTS_MAX_CONCURRENCY = int(
+    os.environ.get("ACC_BENCH_SEED_TTS_MAX_CONCURRENCY", "2")
+)
+if _SEED_TTS_MAX_CONCURRENCY < 1:
+    raise ValueError("ACC_BENCH_SEED_TTS_MAX_CONCURRENCY must be >= 1")
+
 # Match the validated Daily-Omni / Video-MME client body from the MiniCPM run scripts.
 _DAILY_EXTRA_BODY = {
     "modalities": ["text"],
@@ -72,6 +100,13 @@ _DAILY_OMNI_SERVER_ARGS = [
     "--media-io-kwargs",
     '{"video":{"fps":1,"num_frames":128}}',
 ]
+if _DAILY_OMNI_LOCAL_ROOT is not None:
+    _DAILY_OMNI_SERVER_ARGS.extend(
+        [
+            "--allowed-local-media-path",
+            _DAILY_OMNI_LOCAL_ROOT,
+        ]
+    )
 # Video-MME ``minicpm-frames`` sends sampled frames as image_url (no AV interleave).
 # Allow local ``file://`` frame-cache URLs so CI does not need megabyte-scale base64
 # payloads; the autouse fixture still appends ``--videomme-inline-local-video`` when
@@ -81,9 +116,14 @@ _VIDEOMME_SERVER_ARGS = [
     "--allowed-local-media-path",
     os.environ.get("VLLM_TEST_ALLOWED_LOCAL_MEDIA_PATH", "/"),
 ]
-_SEED_TTS_SERVER_ARGS = [
-    "--trust-remote-code",
-]
+_SEED_TTS_SERVER_ARGS = ["--trust-remote-code"]
+if _SEED_TTS_LOCAL_ROOT is not None:
+    _SEED_TTS_SERVER_ARGS.extend(
+        [
+            "--allowed-local-media-path",
+            _SEED_TTS_LOCAL_ROOT,
+        ]
+    )
 
 pytestmark = [pytest.mark.full_model, pytest.mark.omni]
 
@@ -149,7 +189,9 @@ def _optional_local_videomme_dataset_path() -> str | None:
 def _inline_local_media_when_needed(monkeypatch: pytest.MonkeyPatch) -> None:
     """Inline Hub/local media when the server has no usable local-media allowlist.
 
-    Daily-Omni always inlines (matches the historical Qwen/MiniCPM accuracy fixture).
+    Daily-Omni uses compact ``file://`` references when a local Videos directory is
+    available, avoiding the large resident base64 request set in full-dataset runs.
+    It falls back to inline data only when no usable local directory was configured.
     Video-MME prefers ``file://`` via ``--allowed-local-media-path`` (see
     ``_VIDEOMME_SERVER_ARGS``); force inline only when ``VLLM_VIDEOMME_FORCE_INLINE=1``.
     """
@@ -158,7 +200,9 @@ def _inline_local_media_when_needed(monkeypatch: pytest.MonkeyPatch) -> None:
 
     def _wrap_daily() -> list[str]:
         argv = list(original_daily())
-        if "--daily-omni-inline-local-video" not in argv:
+        if _DAILY_OMNI_LOCAL_ROOT is not None:
+            argv = [arg for arg in argv if arg != "--daily-omni-inline-local-video"]
+        elif "--daily-omni-inline-local-video" not in argv:
             argv.append("--daily-omni-inline-local-video")
         return argv
 
@@ -189,6 +233,7 @@ def test_minicpmo_4_5_daily_omni_accuracy_bench(omni_server) -> None:
         skip_seed=True,
         skip_daily=False,
         skip_videomme=True,
+        max_concurrency=_DAILY_OMNI_MAX_CONCURRENCY,
     )
     argv.extend(
         [
@@ -274,7 +319,7 @@ def test_minicpmo_4_5_seed_tts_wer_bench(omni_server) -> None:
         skip_daily=True,
         skip_videomme=True,
         num_prompts=_SEED_TTS_NUM_PROMPTS,
-        max_concurrency=4,
+        max_concurrency=_SEED_TTS_MAX_CONCURRENCY,
     )
     argv.extend(
         [
@@ -289,6 +334,8 @@ def test_minicpmo_4_5_seed_tts_wer_bench(omni_server) -> None:
             "--trust-remote-code",
         ]
     )
+    if _SEED_TTS_LOCAL_ROOT is not None:
+        argv.append("--seed-tts-file-ref-audio")
 
     assert _acc_bench.run_acc_benchmark(_acc_bench.parse_acc_benchmark_args(argv)) == 0
 
