@@ -13,8 +13,8 @@
 |---:|---|---|---|---|
 | 1 | P1 | Code2Wav request-state redundant clone → detached view | 单次性能/Seed 完成，候选通过 | WER 1.3606%、SIM 0.848419；A/B/A 与 duplex 待补 |
 | 2 | P6-A | `token2wav_n_timesteps: 10 → 3 → 10` | 已完成，拒绝 | 性能显著提升，但 Seed-TTS WER 1.3875%→1.4542%、SIM 0.848603→0.846267；已恢复 10 |
-| 3 | P6-B | `token2wav_float16: false → true → false` | A 性能运行中 | 已恢复 n_timesteps=10；先建立同配置 A，再测试 float16 |
-| 4 | P6-C | `codec_chunk_frames: 25 → 20/30` | 待启动 | 先分别测 20、30；保留事件边界 |
+| 3 | P6-B | `token2wav_float16: false → true → false` | 已完成，拒绝 | CFM `float` 输入与 `Half` bias dtype mismatch；性能/Seed 均失败，已恢复默认 false |
+| 4 | P6-C | `codec_chunk_frames: 25 → 20/30` | chunk20 性能运行中 | worktree `exp/p6c-chunk20`，只改 chunk frames，先测 20 再决定 30 |
 | 5 | P6-D | `codec_left_context_frames: 3 → 0/6` | 待启动 | 连续性、边界音频和 duplex 是硬门禁 |
 | 6 | P6-E | stage capacity (`max_num_seqs`, `max_num_batched_tokens`) | 待启动 | 一次只改一个 stage/变量，记录 HBM/KV/OOM |
 | 7 | P3 | SHM/ChunkTransfer profiling 后的固定 header/ring 快速路径 | 待启动 | 先零语义 profiling，再最小实现 |
