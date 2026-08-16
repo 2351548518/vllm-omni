@@ -3,7 +3,7 @@
 **日期**：2026-08-16  
 **设备**：A3 / Ascend 910C  
 **分支**：`minicpm-challenge`  
-**状态**：`idea / 未实现，等待按优先级做 A/B/A`  
+**状态**：`running / 已开始按优先级做长时 A/B/A；队列与结果见 change_log/20260816_0555_experiment_queue.md`
 **范围**：普通流式、半双工、native full-duplex；目标是降低 audio TTFP、chunk RTF、TTFT 和 E2EL，不改变输出语义。
 
 ## 1. 约束与当前基线
@@ -192,3 +192,13 @@ pytest -q \
 最值得先做的不是继续盲调参数，而是 **P0 profiling → P1 Code2Wav CFM/HiFT workspace 复用 → 独立 `n_timesteps` A/B/A → P3 SHM → P4 scheduler/orchestrator**。原因是现有 A3 数据已显示 Stage2 是主要 wall-time 消耗，而 CFM 的 per-step allocation/cat 与每 request 状态复制是明确的核心代码开销；SHM 和 scheduler 优化只有在分层计时证明其占比后才值得投入。`token2wav_n_timesteps=3` 仍是 AGENT 指定的第一参数假设，但必须和核心代码优化分开验证，绝不能以参数下降掩盖推理引擎链路问题。
 
 **本文件没有修改推理代码或默认配置。**
+
+## 7. 连续实验记录
+
+第一轮已执行 P1 request-state clone → detached view 候选：性能三组已完成，Seed-TTS 全量精度正在后处理。后续实验必须等待该轮结果落盘，按 `challenge_docs/change_log/20260816_0555_experiment_queue.md` 的顺序串行推进；每轮保留原始 tmux 日志和独立结果目录，不覆盖 `origin/` baseline。
+
+P6-A 已完成 `token2wav_n_timesteps=3` 的三组性能压测（P1 代码已恢复为 baseline，未混合两个变量）。初步日志显示 3 步使 Stage2 音频生成耗时显著下降，8/128 的 audio RTF 已从 baseline 约 2.62 降至约 0.97；这验证了 Stage2 CFM loop 是强热点，但因为它改变 ODE 递推精度，必须等待全量 Seed-TTS WER/SIM 后再决定是否进入后续 float16/chunk 实验。
+
+### P6-A 最终结果（2026-08-16）
+
+全量 Seed-TTS 已完成（2020 条、并发 4、pytest `1 passed`）。`n_timesteps=3` 的性能收益明确，但 WER 从 1.3875% 回退到 1.4542%，SIM 从 0.848603 回退到 0.846267；因此该参数按精度门禁拒绝，配置已恢复 `10`。这次结果进一步确认 Stage2 CFM loop 是主要 wall-time 热点，但不能以减少 ODE 步数换取精度损失。后续转向不改变递推步数的 dtype、workspace、bridge 和调度路径实验。
