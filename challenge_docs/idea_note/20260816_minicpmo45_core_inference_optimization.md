@@ -202,3 +202,13 @@ P6-A 已完成 `token2wav_n_timesteps=3` 的三组性能压测（P1 代码已恢
 ### P6-A 最终结果（2026-08-16）
 
 全量 Seed-TTS 已完成（2020 条、并发 4、pytest `1 passed`）。`n_timesteps=3` 的性能收益明确，但 WER 从 1.3875% 回退到 1.4542%，SIM 从 0.848603 回退到 0.846267；因此该参数按精度门禁拒绝，配置已恢复 `10`。这次结果进一步确认 Stage2 CFM loop 是主要 wall-time 热点，但不能以减少 ODE 步数换取精度损失。后续转向不改变递推步数的 dtype、workspace、bridge 和调度路径实验。
+
+### P6-B 结果（2026-08-16）
+
+`token2wav_float16=true` 在独立 worktree `exp/p6b-float16` 中验证。服务成功启动，
+但 Stage2 CFM 首个请求即因 `Input type (float) and bias type (c10::Half) should be
+the same` 崩溃；性能组 1 的 32/32 请求失败，Seed-TTS 仅 4/2020 完成、2016 失败、
+4 条无 PCM，WER/SIM 无法评估。第一次 B 启动还记录了 PYTHONPATH 覆盖导致的 `acl`
+导入失败，已单独归档。结论：当前 float16 选项不是可用的参数优化，恢复默认 false；
+若以后要做 dtype 优化，必须先在 Code2Wav CFM/HiFT 全链路建立显式输入、权重和 cache
+dtype 归一化，并以单元测试验证后再重新测性能。
