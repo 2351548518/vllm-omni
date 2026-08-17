@@ -191,7 +191,7 @@ pytest -q \
 
 最值得先做的不是继续盲调参数，而是 **P0 profiling → P1 Code2Wav CFM/HiFT workspace 复用 → 独立 `n_timesteps` A/B/A → P3 SHM → P4 scheduler/orchestrator**。原因是现有 A3 数据已显示 Stage2 是主要 wall-time 消耗，而 CFM 的 per-step allocation/cat 与每 request 状态复制是明确的核心代码开销；SHM 和 scheduler 优化只有在分层计时证明其占比后才值得投入。`token2wav_n_timesteps=3` 仍是 AGENT 指定的第一参数假设，但必须和核心代码优化分开验证，绝不能以参数下降掩盖推理引擎链路问题。
 
-**本文件没有修改推理代码或默认配置。**
+**P6-A 的实验 worktree 没有修改 Python 推理代码，只通过独立配置覆盖验证参数。** 实验期间主分支默认配置保持不变；后续是否合入由精度/全双工门禁决定。
 
 ## 7. 连续实验记录
 
@@ -203,6 +203,8 @@ P6-A 已完成 `token2wav_n_timesteps=3` 的三组性能压测（P1 代码已恢
 
 全量 Seed-TTS 已完成（2020 条、并发 4、pytest `1 passed`）。`n_timesteps=3` 的性能收益明确，但 WER 从 1.3875% 回退到 1.4542%，SIM 从 0.848603 回退到 0.846267；因此该参数按精度门禁拒绝，配置已恢复 `10`。这次结果进一步确认 Stage2 CFM loop 是主要 wall-time 热点，但不能以减少 ODE 步数换取精度损失。后续转向不改变递推步数的 dtype、workspace、bridge 和调度路径实验。
 
+2026-08-17，按用户明确要求，P6-A 以合并提交 `8555eeb9` 合入 `minicpm-challenge`，当前默认配置为 `3`。该决定保留上述已测 WER/SIM 回退和未执行 full-duplex 验证的限制，属于显式性能/质量折中，不代表通过本项目的无损精度门禁。
+
 ### P6-B 结果（2026-08-16）
 
 `token2wav_float16=true` 在独立 worktree `exp/p6b-float16` 中验证。服务成功启动，
@@ -212,3 +214,159 @@ the same` 崩溃；性能组 1 的 32/32 请求失败，Seed-TTS 仅 4/2020 完�
 导入失败，已单独归档。结论：当前 float16 选项不是可用的参数优化，恢复默认 false；
 若以后要做 dtype 优化，必须先在 Code2Wav CFM/HiFT 全链路建立显式输入、权重和 cache
 dtype 归一化，并以单元测试验证后再重新测性能。
+
+### P6-C chunk20 结果（2026-08-16）
+
+独立 worktree `exp/p6c-chunk20`（提交 `0a61a41d`）只把
+`codec_chunk_frames` 从 25 改为 20，`token2wav_n_timesteps=10` 保持不变。Chapter
+10 三档性能均退化：相对 AGENT.md A3 基线，吞吐为 `-0.27%/-5.98%/-16.05%`，
+audio RTF 为 `-0.31%/+5.02%/+17.72%`（1/32、4/64、8/128）；E2EL 也全面上升。
+全量 Seed-TTS（2020/2020，失败/无 PCM/ASR/SIM 错误均 0）得到 WER `1.3921%`
+（基线 1.3875%，+0.0046pp）、WavLM SIM `0.848174`（基线 0.848603，下降
+0.000429），总音频时长 10231.0s。虽然请求门禁通过，性能和质量均不满足无回退，
+因此正式配置保留 25 帧；完整记录见
+`challenge_docs/change_log/20260816_0840_chunk20.md`，原始日志和 JSON 不覆盖基线。
+
+由于 20 帧是单点回退，已保留相邻点 `exp/p6c-chunk30`（提交 `33ddf4ce`）继续测量，
+避免把单点结果误判为所有 chunk 边界均不可优化。后续 context0/context6 实验仍须
+独立验证 PCM 连续性、音频时长和 full-duplex fence/turn 语义。
+
+### P6-C chunk30 结果（2026-08-16）
+
+独立 worktree `exp/p6c-chunk30`（提交 `33ddf4ce`）的 Chapter 10 三档性能明显改善：
+吞吐 `0.5265/0.6330/0.7672 req/s`，audio RTF `0.4612/1.5572/2.5455`，相对
+A3 基线分别改善约 `+6.30%/+10.18%/+2.25%` 和 `-6.54%/-9.37%/-3.01%`，且
+128/128 请求均完成。但全量 Seed-TTS 在约 395/2020 请求时触发跨阶段硬错误：
+Stage2 `SharedMemoryConnector` 报 `MessagePack data is malformed: trailing characters
+(byte 1)`，stage-1 EngineCore 随即退出，后续请求无法连接服务。该结果证明 chunk
+边界改变会暴露现有 SHM 消息边界/并发稳定性风险，性能改善不能抵消链路崩溃；chunk30
+拒绝，正式配置继续为 25。详细证据见
+`challenge_docs/change_log/20260816_090734_chunk30.md` 和对应 run log。
+
+Seed-TTS 收尾 JSON 进一步记录 `completed=398/2020`、`failed=1622`、`no_pcm=2`，
+只有 396 条有 WER/SIM（WER 1.3116%、SIM 0.849311），因此 pytest 表面的
+`1 passed` 不构成质量通过。
+
+这次失败直接调整了后续 P3 思路：先对 SharedMemoryConnector 的 MessagePack header、
+长度校验、并发 writer/reader 和 chunk terminal marker 做只读 profiling 与故障复现，
+再考虑零拷贝/ring 快速路径；任何实现必须先通过长时间 Seed-TTS 和 duplex 消息完整性
+测试，不能以“更少 copy”或更高吞吐作为唯一验收。
+
+### P6-D context0 结果（2026-08-16）
+
+独立 worktree `exp/p6d-context0`（提交 `ec04185f`）将
+`codec_left_context_frames` 从 3 改为 0。三档性能全面退化：吞吐
+`0.4667/0.5683/0.6792 req/s`（相对 A3 `-5.78%/-1.09%/-9.49%`），audio RTF
+`0.6294/2.0143/3.4166`（`+27.57%/+17.23%/+30.21%`）。Seed-TTS 在约 133/2020
+请求再次触发同一 `MessagePack data is malformed: trailing characters (byte 1)`，
+仅 137 成功、1883 失败、1 条无 PCM；context0 拒绝，默认 context=3 保持不变。
+这说明边界上下文改动不仅不能改善性能，还会放大 SHM 消息完整性风险；context6
+仍作为独立相邻点测试，但 P3 必须优先定位该共享内存协议错误。
+
+### P6-D context6 结果（截至性能阶段）
+
+独立 worktree `exp/p6d-context6`（提交 `c61778fb`）将
+`codec_left_context_frames` 从 3 改为 6。1/32、4/64 的局部性能分别为吞吐
+`0.5078/0.5780 req/s`、audio RTF `0.4262/1.5051`，但 8/128 仅开始约 2 个请求
+就触发与 chunk30/context0 相同的 `SharedMemoryConnector` MessagePack trailing
+characters 错误并杀死 stage-1 EngineCore。Seed-TTS 正在同一 worktree 串行执行，
+无论精度结果如何，该候选已因 Chapter 10 稳定性门禁拒绝；完整日志保存在
+`challenge_docs/run_log/p6d_context6_simplex_20260816_092700.log` 和
+`challenge_docs/run_log/p6d_context6_seed_accuracy_20260816_092700.log`。
+
+context0/context6/chunk30 的共同故障使 P3 的第一步收敛为只读协议 profiling：记录
+SHM slot 的 header、payload length、MessagePack decode 边界、并发 writer/reader、
+chunk terminal marker 及失败请求序号；在复现并证明边界后，才允许评估零拷贝或 ring
+buffer。当前不修改默认 deploy，也不把局部 1/32、4/64 改善当作通过。
+
+### P6-E Stage 2 capacity candidate（已建 worktree，待串行测试）
+
+为验证 Stage 2 admission 是否成为并发 8 的排队瓶颈，建立独立
+`exp/p6e-stage2-seqs8`（`699c1c99`），仅将 Stage 2 `max_num_seqs` 从 4 改为 8。
+该变量不与 Stage 0/1 capacity、token cap 或 Code2Wav 参数混合；按默认 A1、B、默认
+A2、Seed-TTS 串行测试。容量提高可能增加 Code2Wav activation/HBM、bucket 碎片和 SHM
+并发压力，若出现 OOM、KV preemption、MessagePack 错误、PCM/精度回退，保留证据并
+拒绝，不改正式配置。
+context6 Seed-TTS 最终 JSON 记录 `completed=137/2020`、`failed=1883`、`no_pcm=1`，
+服务在约 128 条后退出，pytest `1 failed`。这使 context6 与 context0/chunk30 的
+SHM 稳定性证据闭环，不能因为局部吞吐或 SIM 样本均值较高而放宽门禁。
+
+P6-E 的默认 A1 也在 `(8,128)` 只完成 `25/128`、失败 `103`，复现同一个 SHM
+trailing-bytes 错误；`(1,32)`/`(4,64)` 虽完成且吞吐为 `0.517972/0.606788 req/s`，
+但严格 A/B/A 已因 A1 失效而无效。Stage2 `max_num_seqs=8` 的 B 仍会执行，以区分容量
+变量是否改变故障阈值，但不能用局部低并发结果接受该候选。
+
+P6-E B 已完成：`(1,32)` 吞吐 `0.523692 req/s`、TTFT `320.074 ms`、E2EL
+`1909.096 ms`、audio RTF `0.468456`；`(4,64)` 吞吐 `0.599433 req/s`、E2EL
+`6570.309 ms`、audio RTF `1.636925`；两档均完整成功，但没有相对 A3 基线形成稳定
+优势。`(8,128)` 仅完成 `27/128`、失败 `101`，约第 27 条触发同一 SHM
+`MessagePack data is malformed: trailing characters (byte 1)`，之后 API 连接被拒绝。
+把 Stage2 admission 从 4 放宽到 8 没有修复 key/生命周期竞争，反而在高并发保留了
+服务退出；P6-E 已按稳定性门禁拒绝，A2/Seed 仅作为串行对照收尾。
+
+默认 A2 随后完成 `(1,32)=0.513836 req/s`、`(4,64)=0.525208 req/s`，但 `(8,128)`
+仅完成 `20/128`、失败 `108`，同样在第约 20 条触发 SHM trailing-bytes 并退出。
+这使 P6-E 的 A/B/A 性能现场完整，但三次高并发均失败，容量放宽没有可接受收益；
+Seed-TTS 仍仅用于归档收尾，不能改变拒绝结论。
+
+P6-E Seed-TTS 也在约第 249 条复现 SHM 错误，最终请求 `136/2020` 成功、`1884` 失败、
+无 PCM `2`；仅 `134` 条有 WER/SIM，WER `1.4155%`、SIM `0.848637`。虽然评估器对
+已完成样本输出阈值通过，按全量请求门禁仍必须拒绝。Stage2 `max_num_seqs=8` 因而同时
+未解决性能高并发失败与长测 SHM 崩溃，正式配置保持 `4`，后续重点转向 P3/P3B 的
+共享内存协议与 generation key 假设。
+
+### 长测失败的归因规则（复测现场补充）
+
+当前失败不是单一原因，必须按故障层级区分，不能把 pytest 的 `1 failed` 直接等同于“代码改坏了”：
+
+1. **基线与候选共同出现的 SHM 协议/并发故障**：默认 A1 在 `(8,128)` 完成 `25/128` 后也报 `MessagePack data is malformed: trailing characters (byte 1)`，随后 Stage-1 EngineCore 退出、请求返回 HTTP 500。P1 B 在相同阶段、相同错误下完成 `25/128`。因此这两次不能证明 Code2Wav detached-view 补丁引入回退；它们证明当前 `SharedMemoryConnector` key-only 发现、SHM 生命周期/写读边界在高并发下本身不稳定。P3 的 header+logical-length 实验针对该核心问题，但仍需完整 A/B/A、Seed-TTS 和 full-duplex 才能判断修复是否有效。
+2. **确定性的实现/参数错误**：`token2wav_float16=true` 直接触发 CFM 输入 float 与 Half bias 的 dtype mismatch；这是补丁与现有 dtype contract 不一致，属于代码/配置不兼容，已拒绝。`n_timesteps=3` 则服务可运行但 WER/SIM 回退，属于质量门禁拒绝，不是运行时崩溃。
+3. **可运行但不满足验收的性能/质量变化**：chunk20 性能和 Seed-TTS 均轻微退化；即使 pytest 请求全部成功，也必须按 AGENT.md 的性能、WER/SIM 和音频完整性门禁拒绝。
+4. **测试环境或收尾问题**：首次单测缺少 `pytest-mock` 的 `mocker` fixture；P3 单测的 16 个断言均通过但解释器退出码 `134 (corrupted size vs. prev_size)`，这是清理阶段的进程/本机运行时问题，需单独记录，不能伪装成逻辑测试通过。另有一次 PYTHONPATH 覆盖导致 `acl` 导入失败，已通过统一保留 A3 环境路径的脚本规避。
+
+Chapter 10 runner 的断言是故意的：任一请求未完成就会报告失败，避免用剩余成功请求的吞吐掩盖服务已经退出。因此当前结论应写成“运行失败/候选拒绝/环境异常”三类，而不是笼统归因；所有原始日志和 JSON 均保留在 `challenge_docs/run_log/`、`challenge_docs/batch_result/`。
+
+P1 的严格 A/B/A 复测进一步验证了这一归因：默认 A1、P1 B、默认 A2 在 `(8,128)`
+分别只完成约 `25/128`、`25/128`、`26/128`，三者都在同一个 SHM trailing-bytes 错误
+后退出。因此当前没有证据把故障归因到 clone-view 改动本身；在 SHM framing 稳定前，P1
+只能保留单次候选结果，不能合入默认路径。
+
+P1 B 的 Seed-TTS A/B/A 补测最终生成 `completed=137/2020`、`failed=1883`、`no_pcm=1`，
+约第 133 条触发同一 SHM trailing-bytes 错误；仅 136 条成功音频的 WER 均值为 `2.6308%`、
+SIM `0.846211`，pytest 失败。单次性能/精度改善因此正式降级为“不可接受的候选记录”，
+后续优先验证 SHM generation key，而不是继续优化 Code2Wav clone。
+
+P3 的默认 A1 也复现基线：`(1,32)=0.494895 req/s`、`(4,64)=0.555624 req/s`，而
+`(8,128)` 仅完成 `27/128`、失败 `101`，并在第约 27 条记录同一 trailing-bytes 后退出。
+因此 P3 的 framing 改动尚未证明有效；候选 B 仍继续执行以确认是否改变故障阈值，若 B
+或后续 Seed 不能全量成功，将转入 P3B 的 generation key 实验。
+
+P3 B 的 `(1,32)/(4,64)` 完成且吞吐 `0.516469/0.587205 req/s`，但 `(8,128)` 仍为
+`27/128`、`101` 失败，日志在第约 27 条明确记录 trailing-bytes。与默认 A1 的失败
+阈值完全一致，说明只增加 payload header/读取 logical length 不足以解决旧 key 句柄与
+unlink/recreate 竞态；P3 正式拒绝，下一步只改变 transfer generation key，不混合 chunk、
+dtype 或调度参数。
+
+### SHM 故障的下一层代码假设：key 重用窗口
+
+沿代码链路继续追踪后发现，`try_send_via_connector()` 调用
+`connector.put(..., put_key=req_id, ...)`，而同一个流式请求可能跨多个 chunk/Stage
+重复发送。`SharedMemoryConnector.shm_write_bytes()` 在同名 segment 存在时会
+`unlink()` 后重新创建；接收端可能已经通过同一 key 打开旧 segment，之后才取得锁。
+锁文件能串行写入和读取，但不能让“旧 handle 与新 segment 的切换”原子化，因而存在读到
+旧/新 payload 边界混合、随后 msgpack 报 trailing bytes 的窗口。当前 P3 只改变自描述
+payload length，不改变 key 生命周期，必须把它作为独立假设验证；若 P3 仍失败，下一轮
+应只测试 generation/transfer 唯一 key（或原子发布指针），不得同时改变 chunk、dtype 或
+调度参数。该假设来自现有代码静态证据，最终以 P3 长测日志和最小复现确认。
+
+### 复测环境卫生与队列编排（2026-08-16）
+
+复测过程中发现两个会污染结论的测试基础设施问题：旧队列只等待前一个 tmux session，
+曾让 P3B A1 和 P4 A1 同时占用 A3 NPU；另有异常退出留下约 34,561 个 benchmark
+`/dev/shm` 文件，使 64 MiB tmpfs 达到 100%。两项均不是模型精度逻辑，但会造成服务
+启动、SHM 分配和性能数字不可比。已停止受影响的测试、保留原始日志、清理确认属于
+benchmark 的 `shm_*`/`chatcmpl-*`/`sem.*` 临时文件，并将 P4 及后续队列改为等待
+P3B（含通过时的 full-duplex）后严格串行；每个性能 leg 收尾也执行同样的安全清理。
+
+清理不能替代 generation-key 代码实验：它只保证 SHM 容量和 NPU 独占，P3B 仍需在
+`p3b_clean_*` 目录完成 A/B/A、全量 Seed-TTS 和 full-duplex 门禁。

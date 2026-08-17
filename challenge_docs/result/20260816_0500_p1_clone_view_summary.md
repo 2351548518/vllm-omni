@@ -43,6 +43,18 @@ Seed-TTS 过滤测试已在 tmux `minicpm_opt_p1:seed` 中启动，命令为 Cha
 
 性能与精度均为单次候选运行；full-duplex 尚未运行，A/B/A 仍待补齐。
 
-## 判定
+## 严格 A/B/A 与 Seed 补测判定
 
-性能结果和日志已归档，但当前补丁保持“待验收”状态。只有 Seed-TTS 精度无回退、后续 A/B/A 性能重复通过并补做 full-duplex 门禁后，才可将其标为保留；否则恢复 `.clone()`。
+后续自动队列 `minicpm_opt_queue_after_p6d` 已完成默认 A1、P1 B、默认 A2：三者在
+`(8,128)` 分别仅完成约 `25/128`、`25/128`、`26/128`，均因
+`SharedMemoryConnector shm get failed: MessagePack data is malformed: trailing characters
+(byte 1)` 导致 Stage-1 EngineCore 退出。A/B/A 因共同基础链路故障无效，不能证明 clone-view
+补丁导致回退，也不能证明它通过。
+
+P1 B 的 Seed-TTS 补测日志为 [`p1_ab_accuracy_20260816_093500.log`](../run_log/p1_ab_accuracy_20260816_093500.log)，最终 JSON 为
+[`qwen_omni_acc_seed_tts_20260816-123030.json`](../batch_result/p1_ab_accuracy/qwen_omni_acc_seed_tts_20260816-123030.json)：
+`137/2020` 完成、`1883` 失败、`1` 条无 PCM；第 133 条附近复现 SHM 错误，成功样本 WER
+均值 `2.6308%`、SIM `0.846211`，pytest 失败。因此该补丁当前正式判定为“不可接受”，
+保留原始单次改善结果作为历史记录，默认路径继续使用 `.clone()`。
+
+full-duplex 没有在这个已失败候选上运行；待 SHM 修复候选通过 simplex 后再执行独立双工门禁。
