@@ -14,7 +14,7 @@ connectors:
       connector_get_max_wait: 300
       codec_chunk_frames: 25
       codec_left_context_frames: 3
-      token2wav_n_timesteps: 10
+      token2wav_n_timesteps: 3
 
 stages:
   - stage_id: 0
